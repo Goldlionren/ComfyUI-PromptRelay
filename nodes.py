@@ -165,7 +165,7 @@ class PromptRelayEncodeTimeline(io.ComfyNode):
                     tooltip="Conditions the entire video. Anchors persistent characters, objects, and scene context.",
                 ),
                 io.Int.Input(
-                    "max_frames", default=49, min=1, max=10000, step=1,
+                    "max_frames", default=129, min=1, max=10000, step=1,
                     tooltip="Total timeline length in pixel-space frames. Used by the editor for visual scale only.",
                 ),
                 io.String.Input(
@@ -184,6 +184,14 @@ class PromptRelayEncodeTimeline(io.ComfyNode):
                     "epsilon", default=1e-3, min=1e-6, max=0.99, step=1e-4,
                     tooltip="Penalty decay parameter. Values below ~0.1 all produce sharp boundaries (paper default 0.001). For softer transitions, try 0.5 or higher.",
                 ),
+                io.Float.Input(
+                    "fps", default=24.0, min=0.1, max=240.0, step=0.1, optional=True,
+                    tooltip="Frames per second — only affects how time is displayed in the timeline editor when time_units is set to 'seconds'.",
+                ),
+                io.Combo.Input(
+                    "time_units", options=["frames", "seconds"], default="frames", optional=True,
+                    tooltip="Display the ruler, segment ranges, length input, and total in frames or seconds. Internal storage is always pixel-space frames.",
+                ),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
@@ -191,8 +199,9 @@ class PromptRelayEncodeTimeline(io.ComfyNode):
             ],
         )
 
+
     @classmethod
-    def execute(cls, model, clip, latent, global_prompt, max_frames, timeline_data, local_prompts, segment_lengths, epsilon) -> io.NodeOutput:
+    def execute(cls, model, clip, latent, global_prompt, max_frames, timeline_data, local_prompts, segment_lengths, epsilon, fps=24.0, time_units="frames") -> io.NodeOutput:
         patched, conditioning = _encode_relay(
             model, clip, latent, global_prompt, local_prompts, segment_lengths, epsilon,
         )

@@ -64,6 +64,8 @@ class TimelineEditor {
     this.node = node;
     this.container = container;
     this.maxFramesWidget = node.widgets.find(w => w.name === "max_frames");
+    this.fpsWidget = node.widgets.find(w => w.name === "fps");
+    this.timeUnitsWidget = node.widgets.find(w => w.name === "time_units");
     this.timelineDataWidget = node.widgets.find(w => w.name === "timeline_data");
     this.localPromptsWidget = node.widgets.find(w => w.name === "local_prompts");
     this.segmentLengthsWidget = node.widgets.find(w => w.name === "segment_lengths");
@@ -92,6 +94,29 @@ class TimelineEditor {
 
   getMaxFrames() {
     return Math.max(1, parseInt(this.maxFramesWidget?.value, 10) || 1);
+  }
+
+  getFps() {
+    const v = parseFloat(this.fpsWidget?.value);
+    return Number.isFinite(v) && v > 0 ? v : 24;
+  }
+
+  isSecondsMode() {
+    return this.timeUnitsWidget?.value === "seconds";
+  }
+
+  // Format an integer frame count for display in the current units. In seconds mode we show
+  // a tidy decimal (trims trailing zeros) so 24-frame chunks render as "1s" not "1.00s".
+  formatTime(frames) {
+    if (!this.isSecondsMode()) return String(frames);
+    const s = frames / this.getFps();
+    return `${s.toFixed(2).replace(/\.?0+$/, "")}s`;
+  }
+
+  // Length-suffix shown on each block. Frames mode adds an "f" suffix here (not in the
+  // ruler) so block labels read as a duration, not a frame index.
+  formatLength(frames) {
+    return this.isSecondsMode() ? this.formatTime(frames) : `${frames}f`;
   }
 
   buildDOM() {
@@ -130,7 +155,6 @@ class TimelineEditor {
     lengthLabel.textContent = "Length:";
     this.lengthInput = document.createElement("input");
     this.lengthInput.type = "number";
-    this.lengthInput.min = MIN_SEGMENT_LENGTH;
     this.lengthInput.style.cssText = `
       width: 70px; background: #2a2a2a; color: #eee;
       border: 1px solid #444; border-radius: 3px; padding: 2px 4px;
@@ -229,13 +253,19 @@ class TimelineEditor {
       const idx = this.selectedIndex;
       const seg = this.timeline.segments[idx];
       if (!seg) return;
-      const v = parseInt(this.lengthInput.value, 10);
-      if (!Number.isFinite(v) || v < MIN_SEGMENT_LENGTH) return;
+      const raw = parseFloat(this.lengthInput.value);
+      if (!Number.isFinite(raw)) return;
+      // In seconds mode the user types seconds; convert to whole frames since the
+      // backend pipeline is frame-based. Round so 0.5s @ 24fps → 12 frames.
+      const frames = Math.max(
+        MIN_SEGMENT_LENGTH,
+        Math.round(this.isSecondsMode() ? raw * this.getFps() : raw),
+      );
       // Snapshot pre-edit state on the first keystroke so 20→30→20 reverts cleanly.
       if (!this._inputBaseline) {
         this._inputBaseline = this.timeline.segments.map(s => s.length);
       }
-      this._setLengthShifting(idx, v, this._inputBaseline);
+      this._setLengthShifting(idx, frames, this._inputBaseline);
       this.commit();
       this.render();
       this.updateTotalLabel();
@@ -251,6 +281,17 @@ class TimelineEditor {
         prev?.apply(this.maxFramesWidget, args);
         this.trimToFit();
         this.commit();
+        this.updateUIFromSelection();
+        this.render();
+      };
+    }
+    // fps and time_units only affect display — re-render and refresh the editable readouts
+    // (length input, total label) so the active units stay in sync with the widget values.
+    for (const w of [this.fpsWidget, this.timeUnitsWidget]) {
+      if (!w) continue;
+      const prev = w.callback;
+      w.callback = (...args) => {
+        prev?.apply(w, args);
         this.updateUIFromSelection();
         this.render();
       };
@@ -396,7 +437,7 @@ class TimelineEditor {
 
       const segs = this.timeline.segments;
       this.commit();
-      if (segs[this.selectedIndex]) this.lengthInput.value = segs[this.selectedIndex].length;
+      if (segs[this.selectedIndex]) this.lengthInput.value = this.lengthInputValueFor(segs[this.selectedIndex].length);
       this.updateTotalLabel();
       this.render();
       return;
@@ -586,6 +627,13 @@ class TimelineEditor {
 
   // ─── UI sync ───
 
+  // Value to put in the length <input> for a given frame count, formatted in active units.
+  // Seconds mode shows up to 3 decimals (trimmed) so 1-frame steps are visible at any fps.
+  lengthInputValueFor(frames) {
+    if (!this.isSecondsMode()) return String(frames);
+    return (frames / this.getFps()).toFixed(3).replace(/\.?0+$/, "");
+  }
+
   updateUIFromSelection() {
     const seg = this.timeline.segments[this.selectedIndex];
     if (!seg) {
@@ -593,8 +641,11 @@ class TimelineEditor {
       this.lengthInput.value = "";
     } else {
       if (this.textarea.value !== seg.prompt) this.textarea.value = seg.prompt;
-      this.lengthInput.value = seg.length;
+      this.lengthInput.value = this.lengthInputValueFor(seg.length);
     }
+    // Step the input by 1 frame's worth so spinner clicks/arrow keys move sensibly in either mode.
+    this.lengthInput.step = this.isSecondsMode() ? (1 / this.getFps()).toFixed(4) : "1";
+    this.lengthInput.min = this.isSecondsMode() ? (MIN_SEGMENT_LENGTH / this.getFps()).toFixed(4) : MIN_SEGMENT_LENGTH;
     // Programmatic value change invalidates any in-progress baseline.
     this._inputBaseline = null;
     this.updateTotalLabel();
@@ -603,7 +654,13 @@ class TimelineEditor {
   updateTotalLabel() {
     const total = this.timeline.segments.reduce((a, s) => a + s.length, 0);
     const max = this.getMaxFrames();
-    this.totalLabel.textContent = `Total: ${total} / ${max} frames`;
+    if (this.isSecondsMode()) {
+      const fps = this.getFps();
+      const fmt = (f) => (f / fps).toFixed(2).replace(/\.?0+$/, "");
+      this.totalLabel.textContent = `Total: ${fmt(total)} / ${fmt(max)} s @ ${fps}fps`;
+    } else {
+      this.totalLabel.textContent = `Total: ${total} / ${max} frames`;
+    }
   }
 
   // ─── Render ───
@@ -677,9 +734,23 @@ class TimelineEditor {
 
     const ppf = this.pxPerFrame();
     const targetLabelSpacing = 60;
-    let step = Math.max(1, Math.round(targetLabelSpacing / ppf));
-    const niceSteps = [1, 2, 4, 5, 8, 10, 16, 20, 25, 50, 100];
-    for (const s of niceSteps) { if (s >= step) { step = s; break; } }
+
+    // Pick a tick step. Seconds-mode chooses a "nice" duration in seconds and converts to
+    // frames so ticks land on whole-second boundaries when fps is integer; frames-mode
+    // uses the original frame-count nice list.
+    let step;
+    if (this.isSecondsMode()) {
+      const fps = this.getFps();
+      const target = targetLabelSpacing / (ppf * fps);
+      const nice = [0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+      let chosen = nice[nice.length - 1];
+      for (const s of nice) { if (s >= target) { chosen = s; break; } }
+      step = Math.max(1, Math.round(chosen * fps));
+    } else {
+      step = Math.max(1, Math.round(targetLabelSpacing / ppf));
+      const niceSteps = [1, 2, 4, 5, 8, 10, 16, 20, 25, 50, 100];
+      for (const s of niceSteps) { if (s >= step) { step = s; break; } }
+    }
 
     ctx.strokeStyle = "#444";
     ctx.fillStyle = "#aaa";
@@ -693,7 +764,7 @@ class TimelineEditor {
       ctx.moveTo(x, RULER_HEIGHT - 6);
       ctx.lineTo(x, RULER_HEIGHT);
       ctx.stroke();
-      ctx.fillText(String(f), x + 2, 2);
+      ctx.fillText(this.formatTime(f), x + 2, 2);
     }
     // Final tick at max if not aligned
     const xMax = Math.floor(max * ppf) - 0.5;
@@ -747,7 +818,7 @@ class TimelineEditor {
 
       ctx.fillStyle = "rgba(255,255,255,0.75)";
       ctx.font = "10px monospace";
-      const range = `${r.frameStart}–${r.frameEnd} (${seg.length}f)`;
+      const range = `${this.formatTime(r.frameStart)}–${this.formatTime(r.frameEnd)} (${this.formatLength(seg.length)})`;
       const rangeTrunc = this.truncateText(ctx, range, drawW - 8);
       ctx.fillText(rangeTrunc, drawX + 4, blockY + blockH - 14);
     }
@@ -814,6 +885,11 @@ class TimelineEditor {
   }
 }
 
+// Workflows saved before fps/time_units existed restore with a shorter widgets_values
+// array, leaving the new widgets at null / "". ComfyUI's input validator then rejects ""
+// for the Float fps input — restore schema defaults on configure.
+const APPENDED_WIDGET_DEFAULTS = [["fps", 24.0], ["time_units", "frames"]];
+
 app.registerExtension({
   name: "PromptRelay.Timeline",
 
@@ -855,6 +931,10 @@ app.registerExtension({
       const onConfigure = this.onConfigure;
       this.onConfigure = function (info) {
         const out = onConfigure?.apply(this, arguments);
+        for (const [name, def] of APPENDED_WIDGET_DEFAULTS) {
+          const w = this.widgets.find(x => x.name === name);
+          if (w && (w.value == null || w.value === "")) w.value = def;
+        }
         // Rebuild from restored widget values
         setTimeout(() => {
           if (this._timelineEditor) {
