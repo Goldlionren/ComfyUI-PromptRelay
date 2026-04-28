@@ -20,12 +20,15 @@ class PromptRelaySmartEncode(io.ComfyNode):
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
                 io.Latent.Input("latent"),
-                io.String.Input("global_prompt", multiline=True, default=""),
+                io.String.Input(
+                    "global_prompt", multiline=True, default="",
+                    tooltip="Conditions entire video. Leave empty to auto-use the first parsed segment from smart_prompt as the global anchor."
+                ),
                 io.String.Input(
                     "smart_prompt", multiline=True, default="",
                     tooltip="Enter prompt using Smart Syntax:\\n1. Inline: 'text one [0-50] | text two [50-100]'\\n2. Block: 'Second 1:\\ntext one\\nSecond 2:\\ntext two'\\nSyntax is auto-stripped and normalized evenly or proportionally."
                 ),
-                io.Bool.Input("normalize_by_tokens", default=False, tooltip="If true, scales the calculated length of each segment by its token count."),
+                io.Boolean.Input("normalize_by_tokens", default=False, tooltip="If true, scales the calculated length of each segment by its token count."),
                 io.Float.Input("epsilon", default=1e-3, min=1e-6, max=0.99, step=1e-4),
             ],
             outputs=[
@@ -69,8 +72,12 @@ class PromptRelaySmartEncode(io.ComfyNode):
         scale_factor = 100000.0
         segment_lengths_str = ", ".join(str(int(w * scale_factor)) for w in weights_list)
 
+        global_prompt_str = global_prompt.strip()
+        if not global_prompt_str and valid_segments:
+            global_prompt_str = valid_segments[0]["text"]
+
         patched, conditioning = _encode_relay(
-            model, clip, latent, global_prompt, local_prompts_str, segment_lengths_str, epsilon
+            model, clip, latent, global_prompt_str, local_prompts_str, segment_lengths_str, epsilon
         )
 
         return io.NodeOutput(patched, conditioning)
@@ -91,7 +98,7 @@ class PromptRelaySmartEncodeTest(io.ComfyNode):
                     "smart_prompt", multiline=True, default="",
                     tooltip="Enter prompt using Smart Syntax:\\n1. Inline: 'text one [0-50] | text two [50-100]'\\n2. Block: 'Second 1:\\ntext one\\nSecond 2:\\ntext two'\\nSyntax is auto-stripped and normalized evenly or proportionally."
                 ),
-                io.Bool.Input("normalize_by_tokens", default=False),
+                io.Boolean.Input("normalize_by_tokens", default=False),
                 io.Clip.Input("clip", optional=True),
             ],
             outputs=[
