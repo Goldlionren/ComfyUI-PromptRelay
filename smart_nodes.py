@@ -21,7 +21,10 @@ class PromptRelaySmartEncode(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.Latent.Input("latent"),
                 io.String.Input("global_prompt", multiline=True, default=""),
-                io.String.Input("smart_prompt", multiline=True, default=""),
+                io.String.Input(
+                    "smart_prompt", multiline=True, default="",
+                    tooltip="Enter prompt using Smart Syntax:\\n1. Inline: 'text one [0-50] | text two [50-100]'\\n2. Block: 'Second 1:\\ntext one\\nSecond 2:\\ntext two'\\nSyntax is auto-stripped and normalized evenly or proportionally."
+                ),
                 io.Bool.Input("normalize_by_tokens", default=False, tooltip="If true, scales the calculated length of each segment by its token count."),
                 io.Float.Input("epsilon", default=1e-3, min=1e-6, max=0.99, step=1e-4),
             ],
@@ -84,7 +87,10 @@ class PromptRelaySmartEncodeTest(io.ComfyNode):
             category="conditioning/prompt_relay",
             description="Outputs the parsed syntax for testing purposes.",
             inputs=[
-                io.String.Input("smart_prompt", multiline=True, default=""),
+                io.String.Input(
+                    "smart_prompt", multiline=True, default="",
+                    tooltip="Enter prompt using Smart Syntax:\\n1. Inline: 'text one [0-50] | text two [50-100]'\\n2. Block: 'Second 1:\\ntext one\\nSecond 2:\\ntext two'\\nSyntax is auto-stripped and normalized evenly or proportionally."
+                ),
                 io.Bool.Input("normalize_by_tokens", default=False),
                 io.Clip.Input("clip", optional=True),
             ],
