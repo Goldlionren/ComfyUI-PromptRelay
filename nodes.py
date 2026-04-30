@@ -54,6 +54,17 @@ def _convert_to_latent_lengths(pixel_lengths, temporal_stride, latent_frames):
 
 
 def _encode_relay(model, clip, latent, global_prompt, local_prompts, segment_lengths, epsilon, relay_options=None):
+    for name, val in (("global_prompt", global_prompt),
+                      ("local_prompts", local_prompts),
+                      ("segment_lengths", segment_lengths)):
+        if val is None:
+            raise ValueError(
+                f"PromptRelay: '{name}' arrived as None. "
+                "Likely causes: a stale workflow JSON saved with null, the timeline "
+                "editor's web extension failing to load, or an upstream node returning None. "
+                "Set the field to an empty string or fix the upstream connection."
+            )
+
     locals_list = [p.strip() for p in local_prompts.split("|") if p.strip()]
     if not locals_list:
         raise ValueError("At least one local prompt is required (separate with |)")
